@@ -1,0 +1,154 @@
+version: '3.8'
+
+services:
+  plane-db:
+    image: docker.io/library/postgres:15-alpine
+    container_name: plane-db
+    restart: always
+    environment:
+      POSTGRES_USER: plane
+      POSTGRES_PASSWORD: plane_password
+      POSTGRES_DB: plane
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+      - ./plane_data_new/pg_data:/var/lib/postgresql/data:Z
+    networks:
+      - plane_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U plane -d plane"]
+      interval: 10s
+      retries: 5
+
+  plane-redis:
+    image: docker.io/library/redis:7-alpine
+    container_name: plane-redis
+    restart: always
+    volumes:
+      - ./plane_data_new/redis_data:/data:Z
+    networks:
+      - plane_net
+
+  plane-minio:
+    image: docker.io/minio/minio
+    container_name: plane-minio
+    restart: always
+    command: server /data --console-address ":9090"
+    environment:
+      MINIO_ROOT_USER: plane-admin
+      MINIO_ROOT_PASSWORD: plane-secret-key-123
+    volumes:
+      - ./plane_data_new/minio_data:/data:Z
+    networks:
+      - plane_net
+
+  createbuckets:
+    image: docker.io/minio/mc
+    container_name: plane-createbuckets
+    depends_on:
+      - plane-minio
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set myminio http://plane-minio:9000 plane-admin plane-secret-key-123;
+      /usr/bin/mc mb myminio/plane-uploads || true;
+      /usr/bin/mc anonymous set download myminio/plane-uploads;
+      exit 0;
+      "
+    networks:
+      - plane_net
+
+  # 数据库迁移 (关键修复点)
+  plane-migrator:
+    image: docker.io/makeplane/plane-backend:latest
+    container_name: plane-migrator
+    # 必须加引号，解决 "False" 报错
+    restart: "no"
+    env_file: .env
+    # 终极修复：使用 sleep 等待，确保数据库可用
+    command: ["/bin/sh", "-c", "echo 'Waiting 10s for DB...' && sleep 10 && ./bin/docker-entrypoint-migrator.sh"]
+    depends_on:
+      - plane-db
+      - plane-redis
+    networks:
+      - plane_net
+
+  plane-api:
+    image: docker.io/makeplane/plane-backend:latest
+    container_name: plane-api
+    restart: always
+    # 最新版正确命令
+    command: ./bin/docker-entrypoint-api.sh
+    env_file: .env
+    depends_on:
+      - plane-db
+      - plane-redis
+    networks:
+      - plane_net
+
+  plane-worker:
+    image: docker.io/makeplane/plane-backend:latest
+    container_name: plane-worker
+    restart: always
+    command: ./bin/docker-entrypoint-worker.sh
+    env_file: .env
+    depends_on:
+      - plane-api
+      - plane-db
+      - plane-redis
+    networks:
+      - plane_net
+
+  plane-beat:
+    image: docker.io/makeplane/plane-backend:latest
+    container_name: plane-beat
+    restart: always
+    command: ./bin/docker-entrypoint-beat.sh
+    env_file: .env
+    depends_on:
+      - plane-api
+      - plane-db
+      - plane-redis
+    networks:
+      - plane_net
+
+  plane-web:
+    image: docker.io/makeplane/plane-frontend:latest
+    container_name: plane-web
+    restart: always
+    env_file: .env
+    # 修复：默认CMD是 node，需要指定运行 web/server.js
+    command: node web/server.js
+    depends_on:
+      - plane-api
+    networks:
+      - plane_net
+
+  # 管理后台 (God Mode)
+  plane-admin:
+    image: docker.io/makeplane/plane-admin:latest
+    container_name: plane-admin
+    restart: always
+    env_file: .env
+    command: node admin/server.js
+    depends_on:
+      - plane-api
+    networks:
+      - plane_net
+
+  nginx:
+    image: docker.io/library/nginx:alpine
+    container_name: plane-proxy
+    restart: always
+    ports:
+      - "8090:80"
+    volumes:
+      - ./plane_data_new/nginx_conf/plane.conf:/etc/nginx/conf.d/default.conf:ro,Z
+    depends_on:
+      - plane-web
+      - plane-api
+      - plane-admin
+    networks:
+      - plane_net
+
+networks:
+  plane_net:
+    driver: bridge

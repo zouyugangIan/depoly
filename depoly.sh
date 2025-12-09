@@ -1,16 +1,74 @@
 #!/bin/bash
 set -euo pipefail
 
-PROJECT_FILE="podman-compose.yml"
+# ============================================================
+# 数据目录配置 - 使用绝对路径防止数据丢失
+# ============================================================
+POSTGRES_DATA="/home/zyg/postgres_data"
+GITEA_DATA="/home/zyg/gitea_data"
+DRONE_DATA="/home/zyg/drone_data"
+BACKUP_DIR="/home/zyg/backup"
 
+# 脚本所在目录（用于nginx配置等）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_FILE="$SCRIPT_DIR/podman-compose.yml"
+NGINX_CONF_DIR="$SCRIPT_DIR/nginx_conf"
+
+# ============================================================
+# 安全检查函数
+# ============================================================
+check_data_safety() {
+    local dir="$1"
+    local name="$2"
+    
+    if [[ -d "$dir" ]]; then
+        local file_count=$(find "$dir" -type f 2>/dev/null | wc -l)
+        if [[ $file_count -gt 0 ]]; then
+            echo "✓ $name 数据目录存在且包含 $file_count 个文件: $dir"
+            return 0
+        else
+            echo "⚠ $name 数据目录存在但为空: $dir"
+            return 1
+        fi
+    else
+        echo "⚠ $name 数据目录不存在: $dir"
+        return 1
+    fi
+}
+
+echo "============================================================"
+echo "Gitea + Drone 部署脚本"
+echo "============================================================"
+
+# 检查现有数据
+echo ""
+echo ">>> 检查数据目录状态..."
+POSTGRES_OK=false
+GITEA_OK=false
+
+if check_data_safety "$POSTGRES_DATA" "PostgreSQL"; then
+    POSTGRES_OK=true
+fi
+
+if check_data_safety "$GITEA_DATA" "Gitea"; then
+    GITEA_OK=true
+fi
+
+# 如果是首次部署（数据目录为空），给出提示
+if [[ "$POSTGRES_OK" == "false" ]] && [[ "$GITEA_OK" == "false" ]]; then
+    echo ""
+    echo ">>> 检测到首次部署，将创建新的数据目录..."
+fi
+
+echo ""
 echo ">>> 停止并删除旧容器（保留数据卷）..."
-podman-compose -f "$PROJECT_FILE" down || true
+podman-compose -f "$PROJECT_FILE" down 2>/dev/null || true
 
-echo ">>> 创建持久化目录..."
-mkdir -p ./postgres_data ./gitea_data ./drone_data ./nginx_conf ./backup
+echo ">>> 创建/确认持久化目录..."
+mkdir -p "$POSTGRES_DATA" "$GITEA_DATA" "$DRONE_DATA" "$NGINX_CONF_DIR" "$BACKUP_DIR"
 
 echo ">>> 写入 Nginx 配置..."
-cat > ./nginx_conf/nginx.conf <<'EOF'
+cat > "$NGINX_CONF_DIR/nginx.conf" <<'EOF'
 events {
     worker_connections 1024;
 }
@@ -49,7 +107,7 @@ http {
 EOF
 
 echo ">>> 写入 podman-compose.yml..."
-cat > "$PROJECT_FILE" <<'EOF'
+cat > "$PROJECT_FILE" <<EOF
 version: "3.8"
 
 services:
@@ -62,8 +120,8 @@ services:
       POSTGRES_PASSWORD: gitea_pass
       POSTGRES_DB: gitea
     volumes:
-      - ./postgres_data:/var/lib/postgresql/data:Z
-      - ./backup:/backup:Z
+      - $POSTGRES_DATA:/var/lib/postgresql/data:Z
+      - $BACKUP_DIR:/backup:Z
     networks:
       - gitea_net
     healthcheck:
@@ -91,7 +149,7 @@ services:
       GITEA__server__SSH_PORT: 2222
       GITEA__server__SSH_LISTEN_PORT: 22
     volumes:
-      - ./gitea_data:/data:Z
+      - $GITEA_DATA:/data:Z
     ports:
       - "2222:22"
     networks:
@@ -120,7 +178,7 @@ services:
     extra_hosts:
       - "gitea.localhost:host-gateway"
     volumes:
-      - ./drone_data:/data:Z
+      - $DRONE_DATA:/data:Z
     networks:
       gitea_net:
         aliases:
@@ -152,7 +210,7 @@ services:
     container_name: nginx
     restart: always
     volumes:
-      - ./nginx_conf/nginx.conf:/etc/nginx/nginx.conf:ro,Z
+      - $NGINX_CONF_DIR/nginx.conf:/etc/nginx/nginx.conf:ro,Z
     ports:
       - "8080:8080"
     networks:

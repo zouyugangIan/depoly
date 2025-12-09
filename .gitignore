@@ -1,0 +1,22 @@
+# 数据目录 (包含数据库、Redis、MinIO 数据)
+plane_data_new/
+postgres_data/
+gitea_data/
+drone_data/
+backup/
+
+# 环境变量文件 (包含密钥和密码)
+.env
+
+# 生成的 compose 文件 (由脚本自动生成)
+plane-new.yml
+podman-compose.yml
+
+# Nginx 配置 (由脚本自动生成)
+nginx_conf/
+
+# 其他临时文件
+*.log
+*.tmp
+*.bak
+.DS_Store
