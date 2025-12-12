@@ -1,22 +1,54 @@
-# 数据目录 (包含数据库、Redis、MinIO 数据)
-plane_data_new/
+# ============================================================
+# DevOps 部署项目 - Git 忽略文件
+# ============================================================
+
+# === 数据目录 (包含敏感数据，绝对不能提交！) ===
+# Gitea/Drone 数据
 postgres_data/
 gitea_data/
 drone_data/
 backup/
 
-# 环境变量文件 (包含密钥和密码)
-.env
+# Plane 数据
+plane_data/
+plane_data_new/
 
-# 生成的 compose 文件 (由脚本自动生成)
+# === 环境变量文件 (包含密钥和密码) ===
+.env
+.env.*
+!.env.example
+
+# === 生成的 compose 文件 (由脚本自动生成) ===
 plane-new.yml
+plane-robust.yml
 podman-compose.yml
 
-# Nginx 配置 (由脚本自动生成)
+# === Nginx 配置 (由脚本自动生成) ===
 nginx_conf/
 
-# 其他临时文件
+# === rclone 配置 (包含云存储密钥) ===
+rclone.conf
+.rclone.conf
+
+# === 临时文件和备份 ===
 *.log
 *.tmp
 *.bak
+*.swp
+*.swo
+*~
+
+# === 系统文件 ===
 .DS_Store
+Thumbs.db
+desktop.ini
+
+# === IDE 和编辑器 ===
+.idea/
+.vscode/
+*.sublime-*
+
+# === 临时备份目录 ===
+/tmp/
+*.tar.gz
+*.zip
